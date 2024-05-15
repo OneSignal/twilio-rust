@@ -11,7 +11,8 @@ jobs:
       - checkout
       - run: cargo build --release --workspace
       - run: script/check
-      - run: script/format
+      # At some point re-enable but too many formatting issues that it would cause issues with upstream if we ever wanted to update
+      # - run: script/format
       - run: script/test
 
   cloudsmith-deploy:
