@@ -1,0 +1,43 @@
+version: 2.1
+
+jobs:
+  build:
+    docker:
+      - image: europe-west4-docker.pkg.dev/core-infra-onesignal/development/rust-ubuntu:1.76.0-r1
+        auth:
+          username: $DOCKER_LOGIN
+          password: $DOCKER_PASSWORD
+    steps:
+      - checkout
+      - run: cargo build --release --workspace
+      - run: script/check
+      - run: script/format
+      - run: script/test
+
+  cloudsmith-deploy:
+    docker:
+      - image: europe-west4-docker.pkg.dev/core-infra-onesignal/development/rust-ubuntu:1.76.0-r1
+        auth:
+          username: $DOCKER_LOGIN
+          password: $DOCKER_PASSWORD
+    steps:
+      - checkout
+      - run: env CARGO_REGISTRIES_ONESIGNAL_TOKEN="${CLOUDSMITH_API_KEY}" ./script/publish
+
+workflows:
+  version: 2
+  build:
+    jobs:
+      - build:
+          context:
+            - gcp-docker-auth
+      - cloudsmith-deploy:
+          requires:
+            - build
+          context:
+            - onesignal-global
+            - gcp-docker-auth
+          filters:
+            branches:
+              only:
+                - main
