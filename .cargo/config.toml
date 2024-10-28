@@ -1,0 +1,5 @@
+[registries.onesignal]
+index = "sparse+https://dl.cloudsmith.io/GUBmdZszVjcQ5zLa/onesignal/crates/cargo/"
+
+[registries.crates-io]
+protocol = "sparse"

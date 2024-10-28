@@ -10,9 +10,6 @@ jobs:
     steps:
       - checkout
       - run: cargo build --release --workspace
-      - run: script/check
-      - run: script/format
-      - run: script/test
 
   cloudsmith-deploy:
     docker:

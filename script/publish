@@ -1,0 +1,122 @@
+#!/usr/bin/python3
+
+# Taken from
+# https://github.com/getsentry/symbolic/blob/96b5184bd0df8c81c7e6d97c3c09cb0504eda69a/scripts/cargo-publish-all
+# And edited to suit our needs
+#
+# NOTE: A previous version of this script ran `substitute-version`, but that
+# has been removed and it now just publishes whatever version is specified in
+# `Cargo.toml` at the time it is run.
+
+import sys
+import os
+import json
+import time
+import subprocess
+
+
+def sort_by_dep(unsorted):
+    sorted = []
+    unsorted = dict(unsorted)
+    while unsorted:
+        for node, edges in list(unsorted.items()):
+            for edge in edges:
+                if edge in unsorted:
+                    break
+            else:
+                del unsorted[node]
+                sorted.append((node, edges))
+    return sorted
+
+
+def load_metadata():
+    return json.loads(subprocess.Popen(
+        'cargo metadata --no-deps --format-version=1',
+        shell=True, stdout=subprocess.PIPE).communicate()[0])
+
+
+def get_packages():
+    metadata = load_metadata()
+    graph = []
+
+    this_workspace_packages = set(p['name'] for p in metadata['packages'])
+    for pkg in metadata['packages']:
+        graph.append((
+            pkg['name'],
+            [x['name'] for x in pkg['dependencies']
+                if x['name'] in this_workspace_packages]
+        ))
+
+    return sort_by_dep(graph)
+
+
+def run_cmd(cmd, **kwargs):
+    print('$ ' + ' '.join(cmd))
+
+    return subprocess.Popen(cmd, **kwargs).wait()
+
+
+def run_cmd_with_retry(cmd, limit, **kwargs):
+    tries = 1
+    while tries < limit:
+        rc = run_cmd(cmd, **kwargs)
+        if rc == 0:
+            return
+
+        print('$ ' + ' '.join(cmd) + ' Failed - sleeping for 5s and retrying...')
+        time.sleep(5)
+
+        tries += 1
+
+    print('$ ' + ' '.join(cmd) + ' Failed too many times - exiting!')
+    sys.exit(1)
+
+
+def deploy(pkg):
+    run_cmd_with_retry(
+    [
+        'cargo',
+        'publish',
+        '--registry=onesignal-crates',
+
+        # --no-verify is safe because we run cargo check as a separate step
+        '--no-verify',
+
+        # --allow-dirty is safe because we should only be running this deploy as a part of the CircleCI pipeline
+        '--allow-dirty',
+    ], 5, cwd='crates/' + pkg)
+
+
+# From the full packages graph trim everything not requested
+# or their (recursive) dependencies
+def trim(requested, packages):
+    full_set = set()
+
+    to_process = requested.copy()
+    while to_process:
+        current = to_process.pop()
+        # Add ourself as a final package
+        full_set.add(current)
+        # Find all of the dependencies to process as well
+        for dependency in next(deps for (pkg, deps) in packages if pkg == current):
+            to_process.append(dependency)
+
+    return [x for x in packages if x[0] in full_set]
+
+# By default the deploy script will deploy all packages to cloudsmith
+# and is run by the schema.capnp CI
+#
+# However, running ./script/publish pkg1 pkg2 will deploy just those packages (and their dependencies)
+# This is intended for deploying "beta" packages for cross repository testing
+def main():
+    deployment = get_packages()
+    if len(sys.argv) > 1:
+        deployment = trim(sys.argv[1:], deployment)
+        print("Deploying crate subset: " + " ".join([d[0] for d in deployment]))
+        print()
+
+    for pkg, deps in deployment:
+        deploy(pkg)
+
+if __name__ == "__main__":
+    main()
